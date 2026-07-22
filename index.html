@@ -195,7 +195,6 @@
             if (data) {
                 doctors = data;
             } else {
-                // Agar database khali hai toh default data daal do
                 database.ref('doctors').set(defaultDoctors);
                 doctors = defaultDoctors;
             }
@@ -233,6 +232,7 @@
         }
 
         function loginSuccess(badgeText) {
+            localStorage.setItem('srs_logged_in', badgeText);
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('app-ui').classList.remove('hidden');
             document.getElementById('role-badge').innerText = badgeText;
@@ -240,6 +240,7 @@
         }
 
         function handleLogout() {
+            localStorage.removeItem('srs_logged_in');
             document.getElementById('username').value = '';
             document.getElementById('password').value = '';
             document.getElementById('login-error').classList.add('hidden');
@@ -247,7 +248,19 @@
             document.getElementById('app-ui').classList.add('hidden');
         }
 
-        // 5. UPDATE FUNCTIONS (Sends data to Firebase instead of LocalStorage)
+        // Auto login check when page loads/refreshes
+        window.onload = function() {
+            const savedRole = localStorage.getItem('srs_logged_in');
+            if (savedRole) {
+                currentMode = savedRole.includes('OPD') ? 'OPD' : 'RECEPTION';
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('app-ui').classList.remove('hidden');
+                document.getElementById('role-badge').innerText = savedRole;
+                checkTimings(true);
+            }
+        };
+
+    // 5. UPDATE FUNCTIONS
         function updateStatus(id, newStatus) {
             const index = doctors.findIndex(d => d.id === id);
             if(index !== -1) {
@@ -270,6 +283,7 @@
             "Absent": "bg-rose-100 text-rose-700 border-rose-200",
             "Shift Over": "bg-slate-800 text-slate-300 border-slate-700"
         };
+
         const getIcon = (dept) => {
             const d = dept.toUpperCase();
             if(d.includes('CARDIO')) return { icon: 'fa-heart', color: 'text-rose-500', bg: 'bg-rose-100' };
@@ -302,7 +316,6 @@
             return d;
         }
 
-        // 6. AUTO TIMER (Updates Firebase if time is over)
         function checkTimings(manual = false) {
             if(doctors.length === 0) return;
             const now = new Date();
@@ -327,7 +340,7 @@
             }
         }
 
-        setInterval(checkTimings, 60000); // Check every minute
+        setInterval(checkTimings, 60000);
 
         function renderDoctors() {
             if(doctors.length === 0) return;
@@ -444,4 +457,3 @@
     </script>
 </body>
 </html>
-        

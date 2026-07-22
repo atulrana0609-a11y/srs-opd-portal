@@ -84,7 +84,7 @@
             </div>
             
             <div class="flex flex-wrap items-center justify-center gap-3">
-                <button onclick="checkTimings(true)" class="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 border border-indigo-200">
+                <button onclick="checkTimings()" class="bg-indigo-50 text-indigo-600 hover:bg-indigo-100 px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 border border-indigo-200">
                     <i class="fa-solid fa-clock-rotate-left"></i> Sync Timer
                 </button>
                 <button onclick="window.print()" class="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-all shadow-md flex items-center gap-2">
@@ -303,7 +303,7 @@
             return { icon: 'fa-user-md', color: 'text-teal-600', bg: 'bg-teal-50' };
         };
 
-        // 6. SMART TIME PARSER (Categorizes doctors dynamically)
+        // 6. SMART TIME PARSER WITH 'ONCALL' CATEGORY
         function parseTime(timeStr) {
             const match = timeStr.trim().match(/(\d+):(\d+)\s*(AM|PM)/i);
             if (!match) return null;
@@ -323,7 +323,7 @@
             
             const t = doc.time.toUpperCase();
             if (t.includes('NOT AVAILABLE')) return 'OVER';
-            if (t.includes('ON CALL') || t.includes('ONLY IPD')) return 'ACTIVE';
+            if (t.includes('ON CALL') || t.includes('ONLY IPD')) return 'ONCALL';
 
             const parts = t.split('TO');
             if (parts.length === 2) {
@@ -337,11 +337,11 @@
                     return 'ACTIVE';
                 }
             }
-            return 'ACTIVE'; // Fallback
+            return 'ACTIVE';
         }
 
         function checkTimings() {
-            if(doctors.length > 0) renderDoctors(); // Visual sync every minute
+            if(doctors.length > 0) renderDoctors();
         }
         setInterval(checkTimings, 60000); 
 
@@ -356,10 +356,11 @@
                 doc && (doc.name.toLowerCase().includes(searchQuery) || doc.dept.toLowerCase().includes(searchQuery))
             );
 
-            // Create 3 Categories
+            // 4 Categories order: Current -> Upcoming -> On Call -> Over
             const groups = {
-                'ACTIVE': { title: '🟢 CURRENT & ON-CALL DOCTORS', color: 'text-emerald-700 border-emerald-200', bg: 'bg-emerald-50', docs: [] },
+                'ACTIVE': { title: '🟢 CURRENT & ACTIVE DOCTORS', color: 'text-emerald-700 border-emerald-200', bg: 'bg-emerald-50', docs: [] },
                 'UPCOMING': { title: '🟡 UPCOMING SHIFTS', color: 'text-amber-600 border-amber-200', bg: 'bg-amber-50', docs: [] },
+                'ONCALL': { title: '🔵 ON CALL & IPD DOCTORS', color: 'text-blue-600 border-blue-200', bg: 'bg-blue-50', docs: [] },
                 'OVER': { title: '⚫ SHIFT OVER & ABSENT', color: 'text-slate-500 border-slate-200', bg: 'bg-slate-50', docs: [] }
             };
 
@@ -368,7 +369,7 @@
                 groups[cat].docs.push(doc);
             });
 
-            // Render Each Category
+            // Render Each Category in Order
             Object.keys(groups).forEach(key => {
                 const group = groups[key];
                 if (group.docs.length === 0) return;
@@ -467,4 +468,4 @@
 
     </script>
 </body>
-</html> 
+</html>

@@ -236,7 +236,7 @@
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('app-ui').classList.remove('hidden');
             document.getElementById('role-badge').innerText = badgeText;
-            checkTimings(true);
+            checkTimings();
         }
 
         function handleLogout() {
@@ -248,7 +248,7 @@
             document.getElementById('app-ui').classList.add('hidden');
         }
 
-        // Auto login check when page loads/refreshes
+        // Auto login check
         window.onload = function() {
             const savedRole = localStorage.getItem('srs_logged_in');
             if (savedRole) {
@@ -256,11 +256,11 @@
                 document.getElementById('login-screen').classList.add('hidden');
                 document.getElementById('app-ui').classList.remove('hidden');
                 document.getElementById('role-badge').innerText = savedRole;
-                checkTimings(true);
+                checkTimings();
             }
         };
 
-    // 5. UPDATE FUNCTIONS
+        // 5. UPDATE FUNCTIONS
         function updateStatus(id, newStatus) {
             const index = doctors.findIndex(d => d.id === id);
             if(index !== -1) {
@@ -303,6 +303,7 @@
             return { icon: 'fa-user-md', color: 'text-teal-600', bg: 'bg-teal-50' };
         };
 
+        // 6. SMART TIME PARSER (Categorizes doctors dynamically)
         function parseTime(timeStr) {
             const match = timeStr.trim().match(/(\d+):(\d+)\s*(AM|PM)/i);
             if (!match) return null;
@@ -316,31 +317,33 @@
             return d;
         }
 
-        function checkTimings(manual = false) {
-            if(doctors.length === 0) return;
-            const now = new Date();
-            let updates = {};
-            let hasChanges = false;
+        function getCategory(doc) {
+            if (!doc) return 'OVER';
+            if (doc.status === 'Absent' || doc.status === 'Shift Over') return 'OVER';
             
-            doctors.forEach((doc, index) => {
-                if (!doc || doc.status === 'Absent' || doc.status === 'Shift Over') return;
-                if (doc.time.toUpperCase().includes('TO')) {
-                    const timeSegments = doc.time.toUpperCase().split('TO');
-                    if(timeSegments.length > 1) {
-                        const endDate = parseTime(timeSegments[1].trim());
-                        if (endDate && now > endDate) {
-                            updates[index + '/status'] = 'Shift Over';
-                            hasChanges = true;
-                        }
-                    }
+            const t = doc.time.toUpperCase();
+            if (t.includes('NOT AVAILABLE')) return 'OVER';
+            if (t.includes('ON CALL') || t.includes('ONLY IPD')) return 'ACTIVE';
+
+            const parts = t.split('TO');
+            if (parts.length === 2) {
+                const start = parseTime(parts[0]);
+                const end = parseTime(parts[1]);
+                const now = new Date();
+                
+                if (start && end) {
+                    if (now < start) return 'UPCOMING';
+                    if (now > end) return 'OVER';
+                    return 'ACTIVE';
                 }
-            });
-            if(hasChanges) {
-                database.ref('doctors').update(updates);
             }
+            return 'ACTIVE'; // Fallback
         }
 
-        setInterval(checkTimings, 60000);
+        function checkTimings() {
+            if(doctors.length > 0) renderDoctors(); // Visual sync every minute
+        }
+        setInterval(checkTimings, 60000); 
 
         function renderDoctors() {
             if(doctors.length === 0) return;
@@ -353,107 +356,115 @@
                 doc && (doc.name.toLowerCase().includes(searchQuery) || doc.dept.toLowerCase().includes(searchQuery))
             );
 
-            filteredDoctors.sort((a, b) => {
-                if (statusPriority[a.status] !== statusPriority[b.status]) {
-                    return statusPriority[a.status] - statusPriority[b.status];
-                }
-                return a.name.localeCompare(b.name);
-            });
+            // Create 3 Categories
+            const groups = {
+                'ACTIVE': { title: '🟢 CURRENT & ON-CALL DOCTORS', color: 'text-emerald-700 border-emerald-200', bg: 'bg-emerald-50', docs: [] },
+                'UPCOMING': { title: '🟡 UPCOMING SHIFTS', color: 'text-amber-600 border-amber-200', bg: 'bg-amber-50', docs: [] },
+                'OVER': { title: '⚫ SHIFT OVER & ABSENT', color: 'text-slate-500 border-slate-200', bg: 'bg-slate-50', docs: [] }
+            };
 
             filteredDoctors.forEach(doc => {
-                const isBlackout = (doc.status === 'Shift Over');
-                const card = document.createElement('div');
-                card.className = `bg-white p-4 rounded-xl shadow-sm border border-slate-100 card-transition flex flex-col justify-between h-full ${isBlackout ? 'blackout-card' : ''}`;
-                
-                const iconObj = getIcon(doc.dept);
-                
-                let timeDisplayHTML = '';
-                if(currentMode === 'OPD') {
-                    timeDisplayHTML = `<input type="text" value="${doc.time}" onchange="updateTime(${doc.id}, this.value)" class="text-xs bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 w-full font-medium text-slate-700 outline-none focus:border-teal-400" placeholder="Set time">`;
-                } else {
-                    timeDisplayHTML = `<span class="text-slate-700 font-medium text-xs truncate" title="${doc.time}">${doc.time}</span>`;
-                }
-
-                let actionHTML = '';
-                if (currentMode === 'RECEPTION') {
-                    actionHTML = `
-                        <div class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
-                            <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Status</span>
-                            <span class="px-2.5 py-1 rounded-md text-xs font-bold border ${statusColors[doc.status]}">${doc.status}</span>
-                        </div>`;
-                } else {
-                    actionHTML = `
-                        <div class="mt-3 pt-3 border-t border-slate-100">
-                            <div class="flex w-full bg-slate-100 rounded-lg p-1 gap-1">
-                                <label class="flex-1 text-center cursor-pointer">
-                                    <input type="radio" name="status-${doc.id}" value="Available" ${doc.status==='Available'?'checked':''} class="peer sr-only" onchange="updateStatus(${doc.id}, this.value)">
-                                    <div class="peer-checked:bg-emerald-500 peer-checked:text-white text-slate-500 text-[10px] py-1.5 font-bold rounded-md transition-all">Avail</div>
-                                </label>
-                                <label class="flex-1 text-center cursor-pointer">
-                                    <input type="radio" name="status-${doc.id}" value="On Rounds" ${doc.status==='On Rounds'?'checked':''} class="peer sr-only" onchange="updateStatus(${doc.id}, this.value)">
-                                    <div class="peer-checked:bg-blue-500 peer-checked:text-white text-slate-500 text-[10px] py-1.5 font-bold rounded-md transition-all">Round</div>
-                                </label>
-                                <label class="flex-1 text-center cursor-pointer">
-                                    <input type="radio" name="status-${doc.id}" value="Absent" ${doc.status==='Absent'?'checked':''} class="peer sr-only" onchange="updateStatus(${doc.id}, this.value)">
-                                    <div class="peer-checked:bg-rose-500 peer-checked:text-white text-slate-500 text-[10px] py-1.5 font-bold rounded-md transition-all">Absent</div>
-                                </label>
-                                <label class="flex-1 text-center cursor-pointer">
-                                    <input type="radio" name="status-${doc.id}" value="Shift Over" ${doc.status==='Shift Over'?'checked':''} class="peer sr-only" onchange="updateStatus(${doc.id}, this.value)">
-                                    <div class="peer-checked:bg-slate-700 peer-checked:text-white text-slate-500 text-[10px] py-1.5 font-bold rounded-md transition-all">Over</div>
-                                </label>
-                            </div>
-                        </div>`;
-                }
-
-                card.innerHTML = `
-                    <div>
-                        <div class="flex gap-3">
-                            <div class="icon-box ${iconObj.bg} ${iconObj.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
-                                <i class="fa-solid ${iconObj.icon} text-lg"></i>
-                            </div>
-                            <div class="flex-1 overflow-hidden">
-                                <h3 class="text-sm font-bold text-slate-800 leading-tight truncate" title="${doc.name}">${doc.name}</h3>
-                                <p class="text-[11px] font-semibold text-srs-primary mt-0.5 truncate">${doc.dept}</p>
-                            </div>
-                        </div>
-                        <div class="mt-3 grid grid-cols-2 gap-y-2 gap-x-2 text-sm">
-                            <div class="flex flex-col w-full overflow-hidden">
-                                <span class="text-[10px] text-slate-400 font-medium uppercase">Today's Time</span>
-                                ${timeDisplayHTML}
-                            </div>
-                            <div class="flex flex-col">
-                                <span class="text-[10px] text-slate-400 font-medium uppercase">Fee/Details</span>
-                                <span class="text-slate-700 font-medium text-xs"><i class="fa-solid fa-indian-rupee-sign text-slate-400 mr-1 text-[10px]"></i> ${doc.fee}</span>
-                            </div>
-                        </div>
-                    </div>
-                    ${actionHTML}
-                `;
-                listContainer.appendChild(card);
+                const cat = getCategory(doc);
+                groups[cat].docs.push(doc);
             });
+
+            // Render Each Category
+            Object.keys(groups).forEach(key => {
+                const group = groups[key];
+                if (group.docs.length === 0) return;
+
+                group.docs.sort((a, b) => {
+                    if (statusPriority[a.status] !== statusPriority[b.status]) return statusPriority[a.status] - statusPriority[b.status];
+                    return a.name.localeCompare(b.name);
+                });
+
+                // Section Header
+                const header = document.createElement('div');
+                header.className = `col-span-1 md:col-span-2 lg:col-span-3 mt-6 mb-2 pb-2 border-b-2 flex items-center justify-between ${group.color}`;
+                header.innerHTML = `<h2 class="text-[15px] font-bold tracking-wider uppercase">${group.title}</h2>
+                                    <span class="text-xs font-bold px-2 py-1 rounded-lg ${group.bg}">${group.docs.length} Doctors</span>`;
+                listContainer.appendChild(header);
+
+                // Doctors in this category
+                group.docs.forEach(doc => {
+                    const isBlackout = (key === 'OVER');
+                    let displayStatus = doc.status;
+                    if (key === 'OVER' && displayStatus !== 'Absent') displayStatus = 'Shift Over';
+
+                    const card = document.createElement('div');
+                    card.className = `bg-white p-4 rounded-xl shadow-sm border border-slate-100 card-transition flex flex-col justify-between h-full ${isBlackout ? 'blackout-card' : ''}`;
+                    
+                    const iconObj = getIcon(doc.dept);
+                    
+                    let timeDisplayHTML = '';
+                    if(currentMode === 'OPD') {
+                        timeDisplayHTML = `<input type="text" value="${doc.time}" onchange="updateTime(${doc.id}, this.value)" class="text-xs bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 w-full font-medium text-slate-700 outline-none focus:border-teal-400" placeholder="Set time">`;
+                    } else {
+                        timeDisplayHTML = `<span class="text-slate-700 font-medium text-xs truncate" title="${doc.time}">${doc.time}</span>`;
+                    }
+
+                    let actionHTML = '';
+                    if (currentMode === 'RECEPTION') {
+                        actionHTML = `
+                            <div class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+                                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Status</span>
+                                <span class="px-2.5 py-1 rounded-md text-xs font-bold border ${statusColors[displayStatus] || statusColors['Shift Over']}">${displayStatus}</span>
+                            </div>`;
+                    } else {
+                        actionHTML = `
+                            <div class="mt-3 pt-3 border-t border-slate-100">
+                                <div class="flex w-full bg-slate-100 rounded-lg p-1 gap-1">
+                                    <label class="flex-1 text-center cursor-pointer">
+                                        <input type="radio" name="status-${doc.id}" value="Available" ${doc.status==='Available'?'checked':''} class="peer sr-only" onchange="updateStatus(${doc.id}, this.value)">
+                                        <div class="peer-checked:bg-emerald-500 peer-checked:text-white text-slate-500 text-[10px] py-1.5 font-bold rounded-md transition-all">Avail</div>
+                                    </label>
+                                    <label class="flex-1 text-center cursor-pointer">
+                                        <input type="radio" name="status-${doc.id}" value="On Rounds" ${doc.status==='On Rounds'?'checked':''} class="peer sr-only" onchange="updateStatus(${doc.id}, this.value)">
+                                        <div class="peer-checked:bg-blue-500 peer-checked:text-white text-slate-500 text-[10px] py-1.5 font-bold rounded-md transition-all">Round</div>
+                                    </label>
+                                    <label class="flex-1 text-center cursor-pointer">
+                                        <input type="radio" name="status-${doc.id}" value="Absent" ${doc.status==='Absent'?'checked':''} class="peer sr-only" onchange="updateStatus(${doc.id}, this.value)">
+                                        <div class="peer-checked:bg-rose-500 peer-checked:text-white text-slate-500 text-[10px] py-1.5 font-bold rounded-md transition-all">Absent</div>
+                                    </label>
+                                    <label class="flex-1 text-center cursor-pointer">
+                                        <input type="radio" name="status-${doc.id}" value="Shift Over" ${doc.status==='Shift Over'?'checked':''} class="peer sr-only" onchange="updateStatus(${doc.id}, this.value)">
+                                        <div class="peer-checked:bg-slate-700 peer-checked:text-white text-slate-500 text-[10px] py-1.5 font-bold rounded-md transition-all">Over</div>
+                                    </label>
+                                </div>
+                            </div>`;
+                    }
+
+                    card.innerHTML = `
+                        <div>
+                            <div class="flex gap-3">
+                                <div class="icon-box ${iconObj.bg} ${iconObj.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
+                                    <i class="fa-solid ${iconObj.icon} text-lg"></i>
+                                </div>
+                                <div class="flex-1 overflow-hidden">
+                                    <h3 class="text-sm font-bold text-slate-800 leading-tight truncate" title="${doc.name}">${doc.name}</h3>
+                                    <p class="text-[11px] font-semibold text-srs-primary mt-0.5 truncate">${doc.dept}</p>
+                                </div>
+                            </div>
+                            <div class="mt-3 grid grid-cols-2 gap-y-2 gap-x-2 text-sm">
+                                <div class="flex flex-col w-full overflow-hidden">
+                                    <span class="text-[10px] text-slate-400 font-medium uppercase">Today's Time</span>
+                                    ${timeDisplayHTML}
+                                </div>
+                                <div class="flex flex-col">
+                                    <span class="text-[10px] text-slate-400 font-medium uppercase">Fee/Details</span>
+                                    <span class="text-slate-700 font-medium text-xs"><i class="fa-solid fa-indian-rupee-sign text-slate-400 mr-1 text-[10px]"></i> ${doc.fee}</span>
+                                </div>
+                            </div>
+                        </div>
+                        ${actionHTML}
+                    `;
+                    listContainer.appendChild(card);
+                });
+            });
+            
             renderPrintTable();
-        }
-
-        function renderPrintTable() {
-            if(doctors.length === 0) return;
-            const tbody = document.getElementById('print-table-body');
-            const validDoctors = doctors.filter(d => d !== null);
-            const depts = [...new Set(validDoctors.map(d => d.dept))];
-            let html = `<tr><th width="3%">S#</th><th width="22%">DOCTOR NAME</th><th width="25%">TODAY'S TIMING</th><th width="10%">FEE</th><th width="20%">DAYS</th><th width="20%">CURRENT STATUS</th></tr>`;
-            let sno = 1;
-            depts.forEach(dept => {
-                const docsInDept = validDoctors.filter(d => d.dept === dept);
-                if(docsInDept.length > 0) {
-                    html += `<tr><td colspan="6" class="dept-header">${dept}</td></tr>`;
-                    docsInDept.forEach(doc => {
-                        let boldStyle = (doc.status === 'Available' || doc.status === 'On Rounds') ? 'font-weight:bold;' : '';
-                        html += `<tr><td>${sno++}</td><td style="text-align:left; padding-left:4px;">${doc.name}</td><td>${doc.time}</td><td>${doc.fee}</td><td>${doc.days}</td><td style="${boldStyle}">${doc.status}</td></tr>`;
-                    });
-                }
-            });
-            tbody.innerHTML = html;
         }
 
     </script>
 </body>
-</html>
+</html> 
